@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>TIMPA DÜNYASI</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #222;
+            color: white;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        #gameCanvas {
+            background-color: #87CEEB; /* Gökyüzü mavisi */
+            border: 4px solid #fff;
+            display: none; /* Başlangıçta gizli */
+        }
+        #ui-layer {
+            position: absolute;
+            text-align: center;
+        }
+        .btn {
+            padding: 10px 20px;
+            margin: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            background: #ff6b6b;
+            border: none;
+            color: white;
+            font-weight: bold;
+            border-radius: 5px;
+        }
+        .btn:hover { background: #ff5252; }
+        h1 { color: #ffe66d; text-shadow: 2px 2px #000; }
+        .char-card {
+            display: inline-block;
+            border: 2px solid white;
+            padding: 10px;
+            margin: 10px;
+            cursor: pointer;
+            background: #333;
+            width: 150px;
+        }
+        .char-card:hover { background: #555; }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <h1>TIMPA DÜNYASI</h1>
+        <div id="menu">
+            <p>Lütfen Kahramanını Seç:</p>
+            <div class="char-card" onclick="startGame('ahmet')">
+                <div style="color:lightgray">AHMET</div>
+                <small>Creative Dir.<br>Uzun kır saç & sakal</small>
+            </div>
+            <div class="char-card" onclick="startGame('reha')">
+                <div style="color:black; background:white;">REHA</div>
+                <small>Creative Dir.<br>Üstler kel & sakal</small>
+            </div>
+            <div class="char-card" onclick="startGame('bilge')">
+                <div style="color:#d2b48c">BILGE</div>
+                <small>Avukat<br>Kumral & Gözlüklü</small>
+            </div>
+            <div class="char-card" onclick="startGame('ceyda')">
+                <div style="color:#e6c288">CEYDA</div>
+                <small>Eşitlik Uzmanı<br>Kumral Saç</small>
+            </div>
+        </div>
+        <div id="game-over" style="display:none;">
+            <h2 style="color:red">YAKALANDIN!</h2>
+            <p id="death-reason"></p>
+            <button class="btn" onclick="location.reload()">Tekrar Dene</button>
+        </div>
+        <div id="victory" style="display:none;">
+            <h2 style="color:green">EVE ULAŞTIN!</h2>
+            <p>Tebrikler, günü kurtardın.</p>
+            <button class="btn" onclick="location.reload()">Tekrar Oyna</button>
+        </div>
+    </div>
+
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const ui = document.getElementById('ui-layer');
+    const menu = document.getElementById('menu');
+    const gameOverScreen = document.getElementById('game-over');
+    const victoryScreen = document.getElementById('victory');
+
+    // OYUN DEĞİŞKENLERİ
+    let gameRunning = false;
+    let frame = 0;
+    let score = 0;
+    
+    // Fizik
+    const gravity = 0.6;
+    const groundY = 350; // Yerin konumu
+
+    // Kahraman
+    const player = {
+        x: 50,
+        y: groundY - 50,
+        width: 40,
+        height: 60,
+        dx: 0,
+        dy: 0,
+        speed: 5,
+        jumpPower: -12,
+        grounded: false,
+        type: '', 
+        color: 'red' // Default
+    };
+
+    // Tuşlar
+    const keys = {
+        right: false,
+        left: false,
+        up: false
+    };
+
+    // Kamera (Scroll)
+    let cameraX = 0;
+
+    // Düşmanlar ve Engeller
+    let enemies = [];
+    
+    // Harita uzunluğu
+    const levelLength = 4000;
+
+    // Kahraman Özellikleri
+    const heroes = {
+        'ahmet': { color: '#A9A9A9', text: 'Ahmet', hair: 'grey' }, // Gri
+        'reha':  { color: '#2F4F4F', text: 'Reha', hair: 'black' },  // Koyu
+        'bilge': { color: '#CD853F', text: 'Bilge', hair: 'brown' }, // Kumral
+        'ceyda': { color: '#DEB887', text: 'Ceyda', hair: 'brown' }  // Açık Kumral
+    };
+
+    // Düşman Tipleri ve Sözleri
+    const enemyTypes = [
+        { name: 'Art Director', text: 'HATA HATA HATA', color: 'purple', width: 60, height: 60, mac: true },
+        { name: 'Beyaz Yakalı', text: 'Revizyon Revizyon', color: 'blue', width: 40, height: 60 },
+        { name: 'Sakallı Adam', text: 'Bilge Hanım sorum olacak', color: 'black', width: 40, height: 60 },
+        { name: 'Atletli Amca', text: 'Çimleri mi biçiyorsunuz', color: 'orange', width: 45, height: 55 },
+        { name: 'Yaşlı Kadın', text: '*Gürültüden Zıplıyor*', color: 'white', width: 40, height: 55, jumping: true }
+    ];
+
+    // Event Listeners
+    document.addEventListener('keydown', (e) => {
+        if (e.code === 'ArrowRight' || e.code === 'KeyD') keys.right = true;
+        if (e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = true;
+        if ((e.code === 'ArrowUp' || e.code === 'Space') && player.grounded) {
+            player.dy = player.jumpPower;
+            player.grounded = false;
+        }
+    });
+
+    document.addEventListener('keyup', (e) => {
+        if (e.code === 'ArrowRight' || e.code === 'KeyD') keys.right = false;
+        if (e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = false;
+    });
+
+    function createEnemies() {
+        enemies = [];
+        // Rastgele düşmanlar yerleştir (1200px sonrasından başla)
+        let xPos = 600;
+        while (xPos < levelLength - 300) {
+            xPos += Math.random() * 400 + 300; // Aralıklı yerleştir
+            const type = enemyTypes[Math.floor(Math.random() * enemyTypes.length)];
+            
+            enemies.push({
+                x: xPos,
+                y: groundY - type.height,
+                width: type.width,
+                height: type.height,
+                type: type,
+                dy: 0,
+                startY: groundY - type.height
+            });
+        }
+    }
+
+    function startGame(charName) {
+        player.type = charName;
+        player.color = heroes[charName].color;
+        
+        menu.style.display = 'none';
+        canvas.style.display = 'block';
+        gameRunning = true;
+        createEnemies();
+        gameLoop();
+    }
+
+    function update() {
+        if (!gameRunning) return;
+
+        // Hareket
+        if (keys.right) player.x += player.speed;
+        if (keys.left) player.x -= player.speed;
+
+        // Yer çekimi
+        player.dy += gravity;
+        player.y += player.dy;
+
+        // Zemin kontrolü
+        if (player.y + player.height > groundY) {
+            player.y = groundY - player.height;
+            player.dy = 0;
+            player.grounded = true;
+        }
+
+        // Harita Sınırları
+        if (player.x < 0) player.x = 0;
+        if (player.x > levelLength) {
+            // EVE ULAŞTI
+            gameWin();
+        }
+
+        // Kamera Takibi (Mario gibi sağa gittikçe ilerler)
+        if (player.x > cameraX + 300) {
+            cameraX = player.x - 300;
+        }
+
+        // Düşman Mantığı
+        enemies.forEach(enemy => {
+            // Zıplayan teyze mantığı
+            if (enemy.type.jumping) {
+                enemy.dy += gravity;
+                enemy.y += enemy.dy;
+                if (enemy.y > enemy.startY) {
+                    enemy.y = enemy.startY;
+                    // Rastgele zıpla
+                    if (Math.random() < 0.02) enemy.dy = -10;
+                }
+            }
+
+            // Çarpışma Kontrolü
+            if (rectIntersect(player.x, player.y, player.width, player.height, enemy.x, enemy.y, enemy.width, enemy.height)) {
+                // Eğer üstüne basarsa (Mario mantığı)
+                if (player.dy > 0 && player.y + player.height < enemy.y + enemy.height / 2) {
+                    // Düşmanı yok et
+                    enemy.dead = true;
+                    player.dy = -8; // Hafif zıpla
+                } else {
+                    // Çarparsa oyun biter
+                    gameOver(enemy.type.text);
+                }
+            }
+        });
+
+        // Ölü düşmanları temizle
+        enemies = enemies.filter(e => !e.dead);
+    }
+
+    function draw() {
+        if (!gameRunning) return;
+
+        // Arka planı temizle
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        ctx.save();
+        // Kamerayı kaydır
+        ctx.translate(-cameraX, 0);
+
+        // --- ÇİZİMLER ---
+
+        // Zemin
+        ctx.fillStyle = '#654321';
+        ctx.fillRect(0, groundY, levelLength + 800, 50);
+        // Çim
+        ctx.fillStyle = '#32CD32';
+        ctx.fillRect(0, groundY, levelLength + 800, 10);
+
+        // Ev (Bitiş)
+        ctx.fillStyle = '#8B0000';
+        ctx.fillRect(levelLength, groundY - 100, 100, 100); // Ev gövdesi
+        ctx.fillStyle = '#000';
+        ctx.fillRect(levelLength + 35, groundY - 50, 30, 50); // Kapı
+        ctx.fillStyle = '#FFF';
+        ctx.fillText("EVİM EVİM", levelLength + 20, groundY - 110);
+
+        // Oyuncu Çizimi
+        drawPlayer();
+
+        // Düşman Çizimi
+        enemies.forEach(enemy => {
+            // Gövde
+            ctx.fillStyle = enemy.type.color;
+            ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+            
+            // Mac Bilgisayar (Art Director ise)
+            if (enemy.type.mac) {
+                ctx.fillStyle = '#ddd';
+                ctx.fillRect(enemy.x - 20, enemy.y + 10, 20, 40); // Ekran
+                ctx.fillStyle = 'black';
+                ctx.fillText("", enemy.x - 15, enemy.y + 35);
+            }
+
+            // Konuşma Balonu
+            ctx.fillStyle = 'white';
+            ctx.fillRect(enemy.x - 40, enemy.y - 40, 140, 30);
+            ctx.strokeStyle = 'black';
+            ctx.strokeRect(enemy.x - 40, enemy.y - 40, 140, 30);
+            
+            ctx.fillStyle = 'black';
+            ctx.font = '10px Arial';
+            ctx.fillText(enemy.type.text.substring(0, 20), enemy.x - 35, enemy.y - 22);
+        });
+
+        ctx.restore();
+    }
+
+    function drawPlayer() {
+        // Basit karakter çizimi
+        ctx.fillStyle = player.color;
+        ctx.fillRect(player.x, player.y, player.width, player.height);
+        
+        // İsim
+        ctx.fillStyle = 'white';
+        ctx.font = '10px Arial';
+        ctx.fillText(heroes[player.type].text, player.x, player.y - 10);
+
+        // Detaylar (Gözlük vb)
+        if (player.type === 'bilge') {
+            ctx.fillStyle = 'black'; // Gözlük
+            ctx.fillRect(player.x + 5, player.y + 15, 30, 5);
+        }
+        if (player.type === 'ahmet') {
+             ctx.fillStyle = '#ddd'; // Uzun saç
+             ctx.fillRect(player.x - 5, player.y, 10, 40);
+        }
+    }
+
+    function rectIntersect(x1, y1, w1, h1, x2, y2, w2, h2) {
+        return x2 < x1 + w1 && x2 + w2 > x1 && y2 < y1 + h1 && y2 + h2 > y1;
+    }
+
+    function gameOver(reason) {
+        gameRunning = false;
+        canvas.style.display = 'none';
+        gameOverScreen.style.display = 'block';
+        menu.style.display = 'none';
+        
+        let msg = "";
+        if (reason.includes("HATA")) msg = "Art Director seni bir hata olarak gördü!";
+        else if (reason.includes("Revizyon")) msg = "Bitmeyen revizyonlar altında kaldın!";
+        else if (reason.includes("Sorum")) msg = "Bilge Hanım'a gelen sorular seni yavaşlattı!";
+        else if (reason.includes("Çim")) msg = "Atletli amca seni azarladı!";
+        else if (reason.includes("Zıplıyor")) msg = "Yaşlı teyze üstüne düştü!";
+        
+        document.getElementById('death-reason').innerText = msg;
+    }
+
+    function gameWin() {
+        gameRunning = false;
+        canvas.style.display = 'none';
+        victoryScreen.style.display = 'block';
+    }
+
+    function gameLoop() {
+        update();
+        draw();
+        if (gameRunning) requestAnimationFrame(gameLoop);
+    }
+</script>
+</body>
+</html>
